@@ -75,6 +75,7 @@ allowed_origins = list(set([
     "http://127.0.0.1:3000",
     "http://localhost:5000",
     "http://127.0.0.1:5000",
+    "https://send-flowers-frontend.mesakkiappan02.workers.dev"
 ]))
 
 app.add_middleware(

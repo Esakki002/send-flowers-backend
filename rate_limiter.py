@@ -53,7 +53,7 @@ class SlidingWindowRateLimiter:
     async def check_rate_limit(self, request: Request):
         path = request.url.path
         # Skip health check from strict rate limits
-        if path == "/api/health":
+        if path in {"/api/health", "/health", "/heartapi"}:
             logger.debug("Bypassing rate limit check for health endpoint: %s", path)
             return
 

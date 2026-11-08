@@ -2,11 +2,13 @@ import hmac
 import hashlib
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import razorpay
@@ -79,7 +81,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "HEAD", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -138,6 +140,13 @@ async def health_check():
         "service": "sendflowers-backend",
         "razorpay_configured": razorpay_ready,
     }
+
+@app.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/heartapi", methods=["GET", "HEAD"], include_in_schema=False)
+async def heartbeat_page():
+    """Render the browser-friendly service heartbeat page."""
+    template_path = Path(__file__).parent / "templates" / "heartbeat.html"
+    return FileResponse(template_path, media_type="text/html")
 
 @app.get("/api/config")
 async def get_config():

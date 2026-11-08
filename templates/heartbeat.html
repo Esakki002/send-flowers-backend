@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f2">
+  <title>SendFlowers API | Heartbeat</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f6f7f2;
+      color: #183b35;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(ellipse at 50% 45%, #fff 0, #f6f7f2 68%);
+    }
+    main { padding: 3rem 1.5rem; text-align: center; }
+    .pulse {
+      width: 4.5rem;
+      height: 4.5rem;
+      margin: 0 auto 1.5rem;
+      display: grid;
+      place-items: center;
+      border: 1px solid #a9c5b4;
+      border-radius: 50%;
+      color: #25745d;
+      font: 2rem/1 sans-serif;
+      animation: beat 1.6s ease-in-out infinite;
+    }
+    h1 { margin: 0; font-size: clamp(2rem, 8vw, 3.25rem); font-weight: 400; }
+    p { margin: 0.75rem 0 0; color: #55716a; font: 0.95rem/1.5 sans-serif; }
+    .status { color: #25745d; font-weight: 700; }
+    @keyframes beat {
+      50% { transform: scale(1.08); box-shadow: 0 0 0 0.6rem #25745d12; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="pulse" aria-hidden="true">+</div>
+    <h1>SendFlowers API</h1>
+    <p class="status">Heartbeat active</p>
+    <p>The service is responding.</p>
+  </main>
+</body>
+</html>

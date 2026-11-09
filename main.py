@@ -1,6 +1,8 @@
 import hmac
 import hashlib
 import secrets
+import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -116,6 +118,17 @@ class VerifyPaymentRequest(BaseModel):
     cardId: Optional[str] = Field(None, max_length=64)
     deviceId: Optional[str] = Field(None, max_length=128)
     audioData: Optional[str] = Field(None, max_length=5_000_000)
+    frontendUrl: Optional[str] = Field(None, max_length=500)
+    origin: Optional[str] = Field(None, max_length=500)
+
+def slugify_recipient(name: str) -> str:
+    """Create a URL-safe, clean lowercase slug from recipient name."""
+    if not name:
+        return ""
+    normalized = unicodedata.normalize('NFKD', name)
+    cleaned = re.sub(r'[^\w\s-]', '', normalized, flags=re.UNICODE).strip().lower()
+    slug = re.sub(r'[-\s]+', '-', cleaned).strip('-')
+    return slug
 
 def get_razorpay_client() -> razorpay.Client:
     """Initialize and return a Razorpay API client."""
@@ -335,20 +348,29 @@ async def verify_payment(req: VerifyPaymentRequest):
             detail="Invalid payment signature. Payment verification failed.",
         )
 
-    # Generate a unique card ID
-    card_id = req.cardId or secrets.token_urlsafe(8)
-    import urllib.parse
-    import json
-    card_param = urllib.parse.quote(
-        json.dumps({
-            "senderName": req.senderName,
-            "recipientName": req.recipientName,
-            "message": req.message,
-            "language": req.language,
-        })
-    )
-    share_url = f"{FRONTEND_URL}/c/{card_id}?card={card_param}"
-    logger.debug("Generated rose card_id='%s' with share_url='%s'", card_id, share_url)
+    # Generate a clean, short, URL-friendly card ID based on recipient name (e.g. 'sandal')
+    if req.cardId:
+        card_id = req.cardId.strip()
+    else:
+        base_slug = slugify_recipient(req.recipientName)
+        if not base_slug:
+            base_slug = "rose"
+
+        # Check for collision in database
+        candidate = base_slug
+        existing = await database.get_order_by_card_id(candidate)
+        if existing and existing.get("order_id") != order_id:
+            short_token = secrets.token_urlsafe(3).lower().replace("-", "").replace("_", "")[:4]
+            candidate = f"{base_slug}-{short_token}"
+        card_id = candidate
+
+    # Determine base frontend URL: prioritize request frontendUrl/origin if provided, else FRONTEND_URL
+    raw_frontend = (req.frontendUrl or req.origin or FRONTEND_URL).split(",")[0].strip() or "https://send-flowers-frontend.mesakkiappan02.workers.dev"
+    frontend_base = raw_frontend.rstrip("/")
+
+    # Construct the simple, short receiver share URL without bloated query parameters (e.g. https://.../sandal)
+    share_url = f"{frontend_base}/{card_id}"
+    logger.info("Generated short rose card_id='%s' with share_url='%s'", card_id, share_url)
 
     # Send rose email if email is provided
     email_result = None

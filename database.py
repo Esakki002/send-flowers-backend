@@ -170,26 +170,66 @@ async def get_order_by_id(order_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 async def get_order_by_card_id(card_id: str) -> Optional[Dict[str, Any]]:
-    """Find an order by unique card_id."""
+    """Find an order by unique card_id or recipient name slug."""
+    clean_id = (card_id or "").strip()
+    if not clean_id:
+        return None
+
     if supabase_client:
         try:
+            # 1. Exact card_id match
             res = await asyncio.to_thread(
                 lambda: supabase_client.table("orders")
                 .select("*")
-                .eq("card_id", card_id)
+                .eq("card_id", clean_id)
                 .limit(1)
                 .execute()
             )
             if res.data and len(res.data) > 0:
                 return _row_to_order(res.data[0])
+
+            # 2. Case-insensitive card_id match
+            res_ci = await asyncio.to_thread(
+                lambda: supabase_client.table("orders")
+                .select("*")
+                .ilike("card_id", clean_id)
+                .limit(1)
+                .execute()
+            )
+            if res_ci.data and len(res_ci.data) > 0:
+                return _row_to_order(res_ci.data[0])
+
+            # 3. Fallback: match recipient_name
+            res_recip = await asyncio.to_thread(
+                lambda: supabase_client.table("orders")
+                .select("*")
+                .ilike("recipient_name", clean_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res_recip.data and len(res_recip.data) > 0:
+                return _row_to_order(res_recip.data[0])
             return None
         except Exception as exc:
             logger.error("Supabase error in get_order_by_card_id: %s. Falling back to local file.", exc)
 
     async with _lock:
         orders = _read_orders_sync()
+        # 1. Exact card_id match
         for o in orders:
-            if o.get("card_id") == card_id:
+            if o.get("card_id") == clean_id:
+                return o
+        # 2. Case-insensitive card_id match
+        clean_lower = clean_id.lower()
+        for o in orders:
+            cid = (o.get("card_id") or "").strip().lower()
+            if cid == clean_lower:
+                return o
+        # 3. Fallback: match recipient_name
+        for o in orders:
+            recip = o.get("recipient_name") or (o.get("details") or {}).get("recipientName")
+            if recip and str(recip).strip().lower() == clean_lower:
                 return o
         return None
 

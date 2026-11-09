@@ -22,7 +22,11 @@ PORT = int(os.getenv("PORT", "5000"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 ROSE_PRICE_INR = int(os.getenv("ROSE_PRICE_INR", "100"))
 
-# Email settings
+# Email settings - Resend API
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "SendFlowers <onboarding@resend.dev>")
+
+# Fallback SMTP settings
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")

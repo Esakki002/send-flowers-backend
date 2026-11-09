@@ -20,6 +20,8 @@ from config import (
     ROSE_PRICE_INR,
     HOST,
     PORT,
+    RESEND_API_KEY,
+    RESEND_FROM_EMAIL,
     SMTP_USER,
     SMTP_PASSWORD,
 )
@@ -46,10 +48,13 @@ async def lifespan(app: FastAPI):
         "Razorpay Gateway: %s",
         "MOCK MODE (using test fallback)" if is_mock_key() else f"CONFIGURED ({RAZORPAY_KEY_ID[:10]}...)",
     )
-    logger.info(
-        "SMTP Email Service: %s",
-        "ENABLED (Live SMTP dispatch)" if (SMTP_USER and SMTP_PASSWORD) else "SIMULATED (Logs & console only)",
-    )
+    if RESEND_API_KEY:
+        email_status = f"ENABLED (Resend API - from: {RESEND_FROM_EMAIL})"
+    elif SMTP_USER and SMTP_PASSWORD:
+        email_status = "ENABLED (Live SMTP dispatch)"
+    else:
+        email_status = "SIMULATED (Logs & console only)"
+    logger.info("Email Service: %s", email_status)
     logger.info("Database File Path: %s", database.ORDERS_FILE)
     logger.info("==========================================================")
     yield

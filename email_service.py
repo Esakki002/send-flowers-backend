@@ -1,8 +1,11 @@
 import logging
 from email.message import EmailMessage
-import aiosmtplib
 from typing import Dict, Any
+import httpx
+import aiosmtplib
 from config import (
+    RESEND_API_KEY,
+    RESEND_FROM_EMAIL,
     SMTP_HOST,
     SMTP_PORT,
     SMTP_USER,
@@ -113,35 +116,12 @@ async def send_rose_email(
         recipient_name,
         language,
     )
-    if not to_email:
+    if not to_email or not to_email.strip():
         logger.warning("Email sending skipped: No recipient email provided")
         return {"success": False, "status": "skipped", "message": "No recipient email provided"}
 
+    to_email = to_email.strip()
     subject = f"{sender_name} sent you a rose 🌹"
-
-    # If SMTP credentials are not configured, simulate sending
-    if not SMTP_USER or not SMTP_PASSWORD:
-        logger.info(
-            "[SIMULATED EMAIL] SMTP credentials not configured in backend/.env. Simulated delivery to: '%s' | Subject: '%s' | Card: %s",
-            to_email,
-            subject,
-            share_url,
-        )
-        print("\n" + "=" * 60)
-        print(f"📧 [SIMULATED EMAIL - SMTP NOT CONFIGURED]")
-        print(f"To: {to_email}")
-        print(f"Subject: {subject}")
-        print(f"From: {sender_name}")
-        print(f"Card URL: {share_url}")
-        print(f"Message: {message}")
-        print("To send real emails, set SMTP_USER and SMTP_PASSWORD in backend/.env")
-        print("=" * 60 + "\n")
-        return {
-            "success": True,
-            "status": "simulated",
-            "message": "Email simulated (configure SMTP in backend/.env to send real emails)",
-            "to": to_email,
-        }
 
     html_content = generate_rose_email_html(
         sender_name=sender_name,
@@ -150,53 +130,156 @@ async def send_rose_email(
         share_url=share_url,
         language=language,
     )
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>"
-    msg["To"] = to_email
-    msg.set_content(
-        f"Hello {recipient_name},\n\n{sender_name} sent you a digital rose!\n\nPersonal message:\n\"{message}\"\n\nView your 3D rose here:\n{share_url}\n\n---\nSendFlowers"
+    text_content = (
+        f"Hello {recipient_name},\n\n"
+        f"{sender_name} sent you a digital rose!\n\n"
+        f"Personal message:\n\"{message}\"\n\n"
+        f"View your 3D rose here:\n{share_url}\n\n"
+        f"---\nSendFlowers"
     )
-    msg.add_alternative(html_content, subtype="html")
 
-    logger.debug(
-        "Connecting to SMTP server at %s:%d (from='%s', TLS=%s)",
-        SMTP_HOST,
-        SMTP_PORT,
-        SMTP_FROM_EMAIL,
-        SMTP_USE_TLS,
-    )
-    try:
-        if SMTP_PORT == 465:
-            await aiosmtplib.send(
-                msg,
-                hostname=SMTP_HOST,
-                port=SMTP_PORT,
-                username=SMTP_USER,
-                password=SMTP_PASSWORD,
-                use_tls=True,
-                timeout=15,
-            )
-        else:
-            await aiosmtplib.send(
-                msg,
-                hostname=SMTP_HOST,
-                port=SMTP_PORT,
-                username=SMTP_USER,
-                password=SMTP_PASSWORD,
-                start_tls=SMTP_USE_TLS,
-                timeout=15,
-            )
-        logger.info("Rose email delivered successfully to '%s' via %s:%d", to_email, SMTP_HOST, SMTP_PORT)
-        return {"success": True, "status": "sent", "message": "Email sent successfully", "to": to_email}
-    except Exception as e:
-        logger.error("Failed to send rose email to '%s' via SMTP: %s", to_email, e, exc_info=True)
-        print(f"⚠️ Email sending error: {e}")
-        return {
-            "success": False,
-            "status": "error",
-            "message": f"Failed to send email: {str(e)}",
-            "to": to_email,
+    # 1. Preferred: Send via Resend API
+    if RESEND_API_KEY:
+        logger.info("Attempting to send rose email to '%s' via Resend API", to_email)
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY.strip()}",
+            "Content-Type": "application/json",
         }
+        payload = {
+            "from": RESEND_FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    "https://api.resend.com/emails",
+                    headers=headers,
+                    json=payload,
+                )
+
+            if 200 <= res.status_code < 300:
+                data = res.json()
+                email_id = data.get("id")
+                logger.info(
+                    "Rose email delivered successfully to '%s' via Resend (email_id='%s')",
+                    to_email,
+                    email_id,
+                )
+                return {
+                    "success": True,
+                    "status": "sent",
+                    "message": "Email sent successfully via Resend",
+                    "to": to_email,
+                    "id": email_id,
+                }
+            else:
+                err_detail = res.text
+                try:
+                    err_json = res.json()
+                    err_detail = err_json.get("message", res.text)
+                except Exception:
+                    pass
+                logger.error(
+                    "Resend API error (%d) sending email to '%s': %s",
+                    res.status_code,
+                    to_email,
+                    err_detail,
+                )
+                if not (SMTP_USER and SMTP_PASSWORD):
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "message": f"Resend API error ({res.status_code}): {err_detail}",
+                        "to": to_email,
+                    }
+                logger.info("Falling back to SMTP dispatch after Resend error...")
+        except Exception as e:
+            logger.error(
+                "Exception while sending email to '%s' via Resend: %s",
+                to_email,
+                e,
+                exc_info=True,
+            )
+            if not (SMTP_USER and SMTP_PASSWORD):
+                return {
+                    "success": False,
+                    "status": "error",
+                    "message": f"Failed to send email via Resend: {str(e)}",
+                    "to": to_email,
+                }
+            logger.info("Falling back to SMTP dispatch after Resend exception...")
+
+    # 2. Fallback: Send via SMTP if configured
+    if SMTP_USER and SMTP_PASSWORD:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>"
+        msg["To"] = to_email
+        msg.set_content(text_content)
+        msg.add_alternative(html_content, subtype="html")
+
+        logger.debug(
+            "Connecting to SMTP server at %s:%d (from='%s', TLS=%s)",
+            SMTP_HOST,
+            SMTP_PORT,
+            SMTP_FROM_EMAIL,
+            SMTP_USE_TLS,
+        )
+        try:
+            if SMTP_PORT == 465:
+                await aiosmtplib.send(
+                    msg,
+                    hostname=SMTP_HOST,
+                    port=SMTP_PORT,
+                    username=SMTP_USER,
+                    password=SMTP_PASSWORD,
+                    use_tls=True,
+                    timeout=15,
+                )
+            else:
+                await aiosmtplib.send(
+                    msg,
+                    hostname=SMTP_HOST,
+                    port=SMTP_PORT,
+                    username=SMTP_USER,
+                    password=SMTP_PASSWORD,
+                    start_tls=SMTP_USE_TLS,
+                    timeout=15,
+                )
+            logger.info("Rose email delivered successfully to '%s' via SMTP (%s:%d)", to_email, SMTP_HOST, SMTP_PORT)
+            return {"success": True, "status": "sent", "message": "Email sent successfully via SMTP", "to": to_email}
+        except Exception as e:
+            logger.error("Failed to send rose email to '%s' via SMTP: %s", to_email, e, exc_info=True)
+            return {
+                "success": False,
+                "status": "error",
+                "message": f"Failed to send email: {str(e)}",
+                "to": to_email,
+            }
+
+    # 3. Neither Resend nor SMTP configured -> Simulation
+    logger.info(
+        "[SIMULATED EMAIL] No email provider configured in backend/.env. Simulated delivery to: '%s' | Subject: '%s' | Card: %s",
+        to_email,
+        subject,
+        share_url,
+    )
+    print("\n" + "=" * 60)
+    print(f"📧 [SIMULATED EMAIL - NO EMAIL PROVIDER CONFIGURED]")
+    print(f"To: {to_email}")
+    print(f"Subject: {subject}")
+    print(f"From: {sender_name}")
+    print(f"Card URL: {share_url}")
+    print(f"Message: {message}")
+    print("To send real emails, set RESEND_API_KEY in backend/.env")
+    print("=" * 60 + "\n")
+    return {
+        "success": True,
+        "status": "simulated",
+        "message": "Email simulated (configure RESEND_API_KEY in backend/.env to send real emails)",
+        "to": to_email,
+    }
 
